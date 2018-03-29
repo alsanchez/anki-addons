@@ -19,6 +19,7 @@ import re
 import urllib
 import urllib2
 import urlparse
+import httplib
 
 from ..blacklist import get_hash
 from ..download_entry import JpodDownloadEntry
@@ -70,19 +71,9 @@ class JapanesepodDownloader(AudioDownloader):
             field_data.kana = field_data.kanji
         self.field_data = field_data
         self.maybe_get_icon()
-        try:
-            # First get from Japanesepod directly
-            self.get_word_from_japanesepod()
-        except ValueError as ve:
-            if 'blacklist' not in str(ve):
-                # Some *other* ValueError, not our blacklist.
-                raise
-            # We got what should have been error 404, JapanesePod does
-            # not have what we want, so maybe ask wwwjdic.
-            if field_data.kanji == field_data.kana:
-                # The base and the ruby are the same: probably a kana
-                # word. Look it up at Wwwjdic to get kanji spelling.
-                self.get_words_from_wwwjdic()
+
+        # Get from Japanesepod directly
+        self.get_word_from_japanesepod()
 
     def get_word_from_japanesepod(
             self, kanji=None, kana=None, extra_extras=None):
@@ -113,12 +104,25 @@ class JapanesepodDownloader(AudioDownloader):
 
     def jpod_url(self, kanji, kana):
         u"""Return a string that can be used as the url."""
-        qdict = {}
-        if kanji:
-            qdict['kanji'] = kanji.encode('utf-8')
-        if kana:
-            qdict['kana'] = kana.encode('utf-8')
-        return self.url + urllib.urlencode(qdict)
+
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
+
+        params = urllib.urlencode({
+            'post': 'dictionary_reference',
+            'match_type': 'exact',
+            'search_query': kanji.encode('utf-8')
+        })
+
+        connection = httplib.HTTPSConnection('www.japanesepod101.com')
+        connection.request('POST', '/learningcenter/reference/dictionary_post', params, headers)
+        response = connection.getresponse()
+
+        regex = r"url='([^']+\.mp3)'"
+        matches = re.finditer(regex, response.read())
+        for matchNum, match in enumerate(matches):
+            return match.group(1)
 
     def get_words_from_wwwjdic(self):
         soup = self.get_soup_from_url(
